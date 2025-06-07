@@ -27,89 +27,54 @@ app.get("/", (req, res) => {
 });
 
 app.get("/clothing", async (req, res) => {
-  const baseUrl = `https://catalog.roblox.com/v1/search/items/details?Category=${CATEGORY}&CreatorType=2&IncludeNotForSale=true&Limit=${MAX_LIMIT}&CreatorTargetId=${GROUP_ID}`;
+  const category = parseInt(req.query.category) || DEFAULT_CATEGORY;
+  const groupId = parseInt(req.query.groupId) || DEFAULT_GROUP_ID;
+  const cursor = req.query.cursor || "";
+  const limit = Math.min(parseInt(req.query.limit) || 30, 30); // Max 30
 
-  const allItems = [];
-  let cursor = "";
-  let page = 1;
-  let retries = 0;
-
-  async function fetchWithRetry(url) {
-    const MAX_RETRIES = 5;
-    let delay = 1000;
-
-    while (retries < MAX_RETRIES) {
-      try {
-        const response = await fetch(url, {
-          headers: {
-            "User-Agent": "StoreProxy/2.1",
-            "Accept": "application/json",
-          },
-        });
-
-        const text = await response.text();
-        if (response.status === 429) {
-          console.warn(`⏳ 429 Too Many Requests — Retrying in ${delay}ms`);
-          await sleep(delay);
-          delay *= 2;
-          retries++;
-          continue;
-        }
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
-        }
-
-        const json = JSON.parse(text);
-        if (!json || !Array.isArray(json.data)) {
-          throw new Error("Malformed or missing 'data' array");
-        }
-
-        return json;
-      } catch (err) {
-        console.error(`⚠️ Fetch error: ${err.message}`);
-        await sleep(delay);
-        delay *= 2;
-        retries++;
-      }
-    }
-
-    throw new Error("Max retries exceeded");
-  }
+  const url = `https://catalog.roblox.com/v1/search/items/details?Category=${category}&CreatorType=2&IncludeNotForSale=true&Limit=${limit}&CreatorTargetId=${groupId}${cursor ? `&Cursor=${cursor}` : ""}`;
 
   try {
-    while (true) {
-      const url = `${baseUrl}${cursor ? `&Cursor=${cursor}` : ""}`;
-      console.log(`🔁 Page ${page}${cursor ? ` (cursor: ${cursor})` : ""}`);
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "StoreProxy/2.2",
+        "Accept": "application/json",
+      },
+    });
 
-      const json = await fetchWithRetry(url);
+    const text = await response.text();
+    const json = JSON.parse(text);
 
-      const filtered = json.data
-        .filter(item => item.assetType === 11 || item.assetType === 12)
-        .map(item => ({
-          id: item.id,
-          name: item.name,
-          assetType: item.assetType,
-          price: item.price || 0,
-          creatorName: item.creatorName || "Unknown",
-        }));
-
-      allItems.push(...filtered);
-
-      if (!json.nextPageCursor) break;
-
-      cursor = json.nextPageCursor;
-      page++;
-      await sleep(500); // base delay between pages
+    if (!Array.isArray(json.data)) {
+      return res.status(response.status).json({
+        error: "Missing or malformed 'data' array in Roblox response",
+        robloxStatus: response.status,
+        robloxBodyPreview: text.slice(0, 300),
+      });
     }
 
-    logRequest(req.ip, allItems.length);
-    res.json({ data: allItems });
+    const filtered = json.data
+      .filter(item => item.assetType === 11 || item.assetType === 12)
+      .map(item => ({
+        id: item.id,
+        name: item.name,
+        assetType: item.assetType,
+        price: item.price || 0,
+        creatorName: item.creatorName || "Unknown",
+      }));
+
+    logRequest(req, filtered.length);
+
+    res.json({
+      data: filtered,
+      nextPageCursor: json.nextPageCursor || null,
+    });
   } catch (err) {
-    console.error("💥 Failed to fetch all pages:", err.stack || err.message);
-    res.status(500).json({ error: err.message });
+    console.error(`[ERROR] Failed to fetch page: ${err.message}`);
+    res.status(500).json({ error: "Failed to fetch page", details: err.message });
   }
 });
+
 
 app.listen(PORT, () => {
   console.log(`✅ StoreProxy running at http://localhost:${PORT}`);
