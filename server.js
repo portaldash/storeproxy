@@ -7,25 +7,45 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 
+// === Group Settings ===
+const DEFAULT_GROUP_ID = 7813984;
+const DEFAULT_CATEGORY = 3; // 3 = Clothing
+const DEFAULT_LIMIT = 30;
+
+function logRequest(req, resultCount = 0) {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.ip} → ${req.originalUrl} (${resultCount} items)`);
+}
+
 app.get("/", (req, res) => {
-  res.send("✅ Store proxy is running.");
+  res.send("✅ StoreProxy is running. Use /clothing to fetch group assets.");
 });
 
 app.get("/clothing", async (req, res) => {
-  const url = "https://catalog.roblox.com/v1/search/items/details?Category=3&CreatorType=2&IncludeNotForSale=true&Limit=30&CreatorTargetId=7813984";
+  const category = parseInt(req.query.category) || DEFAULT_CATEGORY;
+  const groupId = parseInt(req.query.groupId) || DEFAULT_GROUP_ID;
+  const cursor = req.query.cursor || "";
+  const limit = parseInt(req.query.limit) || DEFAULT_LIMIT;
+  const debug = req.query.debug === "true";
+
+  const url = `https://catalog.roblox.com/v1/search/items/details?Category=${category}&CreatorType=2&IncludeNotForSale=true&Limit=${limit}&CreatorTargetId=${groupId}${cursor ? `&Cursor=${cursor}` : ""}`;
 
   try {
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "RobloxProxy/1.0",
+        "User-Agent": "RobloxProxy/1.1",
         "Accept": "application/json",
       },
     });
 
     const json = await response.json();
 
-    if (!json.data || !Array.isArray(json.data)) {
-      return res.status(500).json({ error: "Unexpected API response format" });
+    if (!json || typeof json !== "object") {
+      return res.status(500).json({ error: "Invalid JSON from Roblox" });
+    }
+
+    if (!Array.isArray(json.data)) {
+      return res.status(500).json({ error: "Missing data array from Roblox response" });
     }
 
     const filtered = json.data
@@ -34,15 +54,27 @@ app.get("/clothing", async (req, res) => {
         id: item.id,
         name: item.name,
         assetType: item.assetType.id,
+        price: item.price || 0,
+        creatorName: item.creator?.name || "Unknown",
       }));
 
-    res.json({ data: filtered });
+    logRequest(req, filtered.length);
+
+    res.json({
+      data: filtered,
+      nextPageCursor: json.nextPageCursor || null,
+      previousPageCursor: json.previousPageCursor || null,
+      raw: debug ? json : undefined,
+    });
   } catch (err) {
-    console.error("Fetch error:", err);
-    res.status(500).json({ error: "Failed to fetch clothing assets" });
+    console.error(`[ERROR] Failed to fetch from Roblox API:\n`, err.stack || err.message);
+    res.status(500).json({
+      error: "Failed to fetch group assets",
+      suggestion: "Make sure the group has published clothing. Try adding '?debug=true' to see full response.",
+    });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Store proxy running at http://localhost:${PORT}`);
+  console.log(`✅ StoreProxy running at http://localhost:${PORT}`);
 });
