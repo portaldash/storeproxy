@@ -8,18 +8,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 
 // === Group Settings ===
-const GROUP_ID = 7813984;
-const CATEGORY = 3; // Clothing
-const MAX_LIMIT = 30; // Allowed: 10, 28, or 30
-const DELAY_BETWEEN_REQUESTS = 500; // ms
+const DEFAULT_GROUP_ID = 7813984;
+const DEFAULT_CATEGORY = 3; // 3 = Clothing
+const DEFAULT_LIMIT = 30;
 
-function logRequest(ip, resultCount = 0) {
+function logRequest(req, resultCount = 0) {
   const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${ip} → /clothing (${resultCount} items)`);
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  console.log(`[${timestamp}] ${req.ip} → ${req.originalUrl} (${resultCount} items)`);
 }
 
 app.get("/", (req, res) => {
@@ -30,7 +25,7 @@ app.get("/clothing", async (req, res) => {
   const category = parseInt(req.query.category) || DEFAULT_CATEGORY;
   const groupId = parseInt(req.query.groupId) || DEFAULT_GROUP_ID;
   const cursor = req.query.cursor || "";
-  const limit = Math.min(parseInt(req.query.limit) || 30, 30); // Max 30
+  const limit = Math.min(parseInt(req.query.limit) || DEFAULT_LIMIT, 30); // Roblox hard limit is 30
 
   const url = `https://catalog.roblox.com/v1/search/items/details?Category=${category}&CreatorType=2&IncludeNotForSale=true&Limit=${limit}&CreatorTargetId=${groupId}${cursor ? `&Cursor=${cursor}` : ""}`;
 
@@ -74,7 +69,6 @@ app.get("/clothing", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch page", details: err.message });
   }
 });
-
 
 app.listen(PORT, () => {
   console.log(`✅ StoreProxy running at http://localhost:${PORT}`);
