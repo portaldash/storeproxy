@@ -33,19 +33,29 @@ app.get("/clothing", async (req, res) => {
   try {
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "RobloxProxy/1.1",
+        "User-Agent": "RobloxProxy/1.2",
         "Accept": "application/json",
       },
     });
 
-    const json = await response.json();
+    const text = await response.text();
+    let json;
 
-    if (!json || typeof json !== "object") {
-      return res.status(500).json({ error: "Invalid JSON from Roblox" });
+    try {
+      json = JSON.parse(text);
+    } catch (parseErr) {
+      console.error("❌ Failed to parse JSON from Roblox:\n", text.slice(0, 300));
+      return res.status(500).json({ error: "Could not parse JSON from Roblox", bodyPreview: text.slice(0, 300) });
     }
 
-    if (!Array.isArray(json.data)) {
-      return res.status(500).json({ error: "Missing data array from Roblox response" });
+    if (!json || typeof json !== "object" || !Array.isArray(json.data)) {
+      console.error("⚠️ Unexpected Roblox response:", JSON.stringify(json, null, 2));
+      return res.status(500).json({
+        error: "Missing or malformed 'data' array in Roblox response",
+        robloxStatus: response.status,
+        robloxBodyPreview: text.slice(0, 300),
+        suggestion: "Add '?debug=true' to inspect full Roblox response",
+      });
     }
 
     const filtered = json.data
@@ -67,11 +77,8 @@ app.get("/clothing", async (req, res) => {
       raw: debug ? json : undefined,
     });
   } catch (err) {
-    console.error(`[ERROR] Failed to fetch from Roblox API:\n`, err.stack || err.message);
-    res.status(500).json({
-      error: "Failed to fetch group assets",
-      suggestion: "Make sure the group has published clothing. Try adding '?debug=true' to see full response.",
-    });
+    console.error(`[ERROR] Exception during fetch:\n`, err.stack || err.message);
+    res.status(500).json({ error: "Exception occurred during fetch" });
   }
 });
 
