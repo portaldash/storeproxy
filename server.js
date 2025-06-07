@@ -32,36 +32,57 @@ app.get("/clothing", async (req, res) => {
   const allItems = [];
   let cursor = "";
   let page = 1;
+  let retries = 0;
+
+  async function fetchWithRetry(url) {
+    const MAX_RETRIES = 5;
+    let delay = 1000;
+
+    while (retries < MAX_RETRIES) {
+      try {
+        const response = await fetch(url, {
+          headers: {
+            "User-Agent": "StoreProxy/2.1",
+            "Accept": "application/json",
+          },
+        });
+
+        const text = await response.text();
+        if (response.status === 429) {
+          console.warn(`⏳ 429 Too Many Requests — Retrying in ${delay}ms`);
+          await sleep(delay);
+          delay *= 2;
+          retries++;
+          continue;
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
+        }
+
+        const json = JSON.parse(text);
+        if (!json || !Array.isArray(json.data)) {
+          throw new Error("Malformed or missing 'data' array");
+        }
+
+        return json;
+      } catch (err) {
+        console.error(`⚠️ Fetch error: ${err.message}`);
+        await sleep(delay);
+        delay *= 2;
+        retries++;
+      }
+    }
+
+    throw new Error("Max retries exceeded");
+  }
 
   try {
     while (true) {
       const url = `${baseUrl}${cursor ? `&Cursor=${cursor}` : ""}`;
-
       console.log(`🔁 Page ${page}${cursor ? ` (cursor: ${cursor})` : ""}`);
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent": "StoreProxy/2.1",
-          "Accept": "application/json",
-        },
-      });
 
-      const text = await response.text();
-      let json;
-      try {
-        json = JSON.parse(text);
-      } catch (parseErr) {
-        console.error("❌ Failed to parse JSON:\n", text.slice(0, 300));
-        return res.status(500).json({ error: "Invalid JSON from Roblox", bodyPreview: text.slice(0, 300) });
-      }
-
-      if (!json || !Array.isArray(json.data)) {
-        console.error("⚠️ Malformed data:\n", text.slice(0, 300));
-        return res.status(500).json({
-          error: "Missing or malformed 'data' array in Roblox response",
-          robloxStatus: response.status,
-          robloxBodyPreview: text.slice(0, 300),
-        });
-      }
+      const json = await fetchWithRetry(url);
 
       const filtered = json.data
         .filter(item => item.assetType === 11 || item.assetType === 12)
@@ -79,14 +100,14 @@ app.get("/clothing", async (req, res) => {
 
       cursor = json.nextPageCursor;
       page++;
-      await sleep(DELAY_BETWEEN_REQUESTS);
+      await sleep(500); // base delay between pages
     }
 
     logRequest(req.ip, allItems.length);
     res.json({ data: allItems });
   } catch (err) {
-    console.error("💥 Unexpected error:\n", err.stack || err.message);
-    res.status(500).json({ error: "Fetch failed unexpectedly" });
+    console.error("💥 Failed to fetch all pages:", err.stack || err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
