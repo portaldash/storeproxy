@@ -3,36 +3,45 @@ import fetch from "node-fetch";
 import cors from "cors";
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
 app.use(cors());
 
-const GROUP_ID = 7813984;
-let cachedData = null;
-let lastFetched = 0;
-const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
-
-async function fetchClothing() {
-  const url = `https://catalog.roproxy.com/v2/search/items/details?Category=3&CreatorType=2&CreatorTargetId=${GROUP_ID}&Limit=100`;
-
-  const res = await fetch(url);
-  const json = await res.json();
-
-  const results = (json.data || []).filter(i => i.assetType === 11 || i.assetType === 12);
-  return results;
-}
-
-app.get("/clothing", async (req, res) => {
-  if (Date.now() - lastFetched > CACHE_DURATION || !cachedData) {
-    try {
-      cachedData = await fetchClothing();
-      lastFetched = Date.now();
-    } catch (e) {
-      console.error("Failed to fetch:", e);
-      return res.status(500).json({ error: "Fetch failed" });
-    }
-  }
-
-  res.json({ data: cachedData });
+app.get("/", (req, res) => {
+  res.send("✅ Store Proxy is running.");
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Clothing proxy running on port ${PORT}`));
+app.get("/clothing", async (req, res) => {
+  const groupId = 7813984;
+  const catalogUrl = `https://catalog.roblox.com/v1/search/items?category=Clothing&creatorTargetId=${groupId}&creatorType=Group&limit=30&sortOrder=Desc`;
+
+  try {
+    const response = await fetch(catalogUrl, {
+      headers: {
+        "User-Agent": "RobloxClothingProxy/1.0",
+        "Accept": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: "Roblox API error" });
+    }
+
+    const json = await response.json();
+
+    const cleaned = (json.data || []).map(item => ({
+      id: item.id,
+      name: item.name,
+      assetType: item.assetType?.id || null, // Should be 11 (Shirt), 12 (Pants)
+    })).filter(item => item.assetType === 11 || item.assetType === 12);
+
+    res.json({ data: cleaned });
+  } catch (error) {
+    console.error("Proxy failed to fetch clothing:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`✅ Store proxy listening on port ${PORT}`);
+});
