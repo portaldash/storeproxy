@@ -33,7 +33,7 @@ app.get("/clothing", async (req, res) => {
   try {
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "RobloxProxy/1.2",
+        "User-Agent": "StoreProxy/1.3",
         "Accept": "application/json",
       },
     });
@@ -45,27 +45,26 @@ app.get("/clothing", async (req, res) => {
       json = JSON.parse(text);
     } catch (parseErr) {
       console.error("❌ Failed to parse JSON from Roblox:\n", text.slice(0, 300));
-      return res.status(500).json({ error: "Could not parse JSON from Roblox", bodyPreview: text.slice(0, 300) });
+      return res.status(500).json({ error: "Invalid JSON from Roblox", bodyPreview: text.slice(0, 300) });
     }
 
     if (!json || typeof json !== "object" || !Array.isArray(json.data)) {
-      console.error("⚠️ Unexpected Roblox response:", JSON.stringify(json, null, 2));
+      console.error("⚠️ Unexpected structure:", JSON.stringify(json, null, 2));
       return res.status(500).json({
         error: "Missing or malformed 'data' array in Roblox response",
         robloxStatus: response.status,
         robloxBodyPreview: text.slice(0, 300),
-        suggestion: "Add '?debug=true' to inspect full Roblox response",
       });
     }
 
     const filtered = json.data
-      .filter(item => item.assetType?.id === 11 || item.assetType?.id === 12)
+      .filter(item => item.assetType === 11 || item.assetType === 12) // Pants or Shirt
       .map(item => ({
         id: item.id,
         name: item.name,
-        assetType: item.assetType.id,
+        assetType: item.assetType,
         price: item.price || 0,
-        creatorName: item.creator?.name || "Unknown",
+        creatorName: item.creatorName || "Unknown",
       }));
 
     logRequest(req, filtered.length);
@@ -78,9 +77,10 @@ app.get("/clothing", async (req, res) => {
     });
   } catch (err) {
     console.error(`[ERROR] Exception during fetch:\n`, err.stack || err.message);
-    res.status(500).json({ error: "Exception occurred during fetch" });
+    res.status(500).json({ error: "Fetch failed unexpectedly" });
   }
 });
+
 
 app.listen(PORT, () => {
   console.log(`✅ StoreProxy running at http://localhost:${PORT}`);
